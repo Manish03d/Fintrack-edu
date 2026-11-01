@@ -740,3 +740,8 @@ The client declares an `npm run lint` script, but the current client package doe
 - Recruiter and student pages must remain protected by both client route guards and backend role middleware.
 - The current repository has no Git metadata at its root in this workspace, so Git history and status are not available here.
 - `client/dist/` is generated output and should not be committed.
+## Project Maintainer
+
+Maintained by Manish D.
+
+GitHub: https://github.com/Manish03d
