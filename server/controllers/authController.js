@@ -280,9 +280,9 @@ export const completeGoogleRegistration = async (req, res) => {
   }
 };
 
-// Generate random 6-digit OTP
+// Generate cryptographically secure 6-digit OTP
 const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 };
 
 /**
@@ -302,7 +302,7 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid role specified' });
     }
 
-    const otpCode = '123456'; // Default predictable code for development ease
+    const otpCode = generateOTP();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
 
     if (req.isDbConnected) {
@@ -398,6 +398,10 @@ export const verifyOtp = async (req, res) => {
         return res.status(404).json({ success: false, message: 'User not found' });
       }
 
+      if (user.otpExpires && user.otpExpires < new Date()) {
+        return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new code.' });
+      }
+
       if (user.otpCode !== otpCode) {
         return res.status(400).json({ success: false, message: 'Invalid OTP code. Please check and try again.' });
       }
@@ -456,7 +460,19 @@ export const resendOtp = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
 
-    const newOtp = '123456';
+    const newOtp = generateOTP();
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+
+    if (req.isDbConnected) {
+      const user = await User.findOne({ email: email.toLowerCase() });
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'User not found' });
+      }
+      user.otpCode = newOtp;
+      user.otpExpires = otpExpires;
+      await user.save();
+    }
+
     await sendVerificationEmail(email, newOtp);
 
     return res.json({
@@ -550,8 +566,20 @@ export const forgotPassword = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email address is required' });
 
-    const resetToken = 'reset-token-' + Date.now();
-    await sendPasswordResetEmail(email, resetToken);
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    if (req.isDbConnected) {
+      const user = await User.findOne({ email: email.toLowerCase() });
+      if (user) {
+        user.resetPasswordToken = hashedToken;
+        user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        await user.save();
+        await sendPasswordResetEmail(email, rawToken);
+      }
+    } else {
+      await sendPasswordResetEmail(email, rawToken);
+    }
 
     return res.json({
       success: true,
@@ -571,6 +599,32 @@ export const resetPassword = async (req, res) => {
   try {
     const { token, password } = req.body;
     if (!password) return res.status(400).json({ success: false, message: 'New password is required' });
+    if (!token) return res.status(400).json({ success: false, message: 'Password reset token is required' });
+
+    if (req.isDbConnected) {
+      const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+      const user = await User.findOne({
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: { $gt: new Date() },
+      });
+
+      if (!user) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password reset token is invalid or has expired. Please request a new link.',
+        });
+      }
+
+      user.passwordHash = password; // Trigger bcrypt hashing in user pre-save hook
+      user.resetPasswordToken = null;
+      user.resetPasswordExpires = null;
+      await user.save();
+
+      return res.json({
+        success: true,
+        message: 'Password has been reset successfully. You can now login with your new password.',
+      });
+    }
 
     return res.json({
       success: true,

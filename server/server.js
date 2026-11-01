@@ -30,6 +30,7 @@ import studentSkillRoutes from './routes/studentSkillRoutes.js';
 import studentCareerRoutes from './routes/studentCareerRoutes.js';
 import studentSettingsRoutes from './routes/studentSettingsRoutes.js';
 import studentSupportRoutes from './routes/studentSupportRoutes.js';
+import studentLeaderboardRoutes from './routes/studentLeaderboardRoutes.js';
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 
 dotenv.config();
@@ -86,6 +87,7 @@ app.use('/api/student/skills', studentSkillRoutes);
 app.use('/api/student/career', studentCareerRoutes);
 app.use('/api/student/settings', studentSettingsRoutes);
 app.use('/api/student/support', studentSupportRoutes);
+app.use('/api/student/leaderboard', studentLeaderboardRoutes);
 app.use('/api/mentor', mentorRoutes);
 app.use('/api/recruiter', recruiterDashboardRoutes);
 app.use('/api/recruiter/jobs', recruiterJobRoutes);

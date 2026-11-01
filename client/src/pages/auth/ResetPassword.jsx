@@ -1,20 +1,35 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
 import Toast from '../../components/common/Toast';
-import { Lock, CheckCircle2 } from 'lucide-react';
+import { Lock, KeyRound, CheckCircle2 } from 'lucide-react';
 import API from '../../services/api';
 
 const ResetPassword = () => {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({ password: '', confirmPassword: '' });
+  const [searchParams] = useSearchParams();
+  const tokenFromUrl = searchParams.get('token') || '';
+
+  const [formData, setFormData] = useState({
+    token: tokenFromUrl,
+    password: '',
+    confirmPassword: '',
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!formData.token) {
+      setError('Password reset token is required');
+      return;
+    }
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
       return;
@@ -23,7 +38,10 @@ const ResetPassword = () => {
     setIsLoading(true);
     setError('');
     try {
-      await API.post('/auth/reset-password', { token: 'demo-token', password: formData.password });
+      await API.post('/auth/reset-password', {
+        token: formData.token.trim(),
+        password: formData.password,
+      });
       setIsSuccess(true);
       setTimeout(() => navigate('/login'), 2000);
     } catch (err) {
@@ -48,12 +66,24 @@ const ResetPassword = () => {
           <>
             <div>
               <h2 className="text-2xl font-bold text-slate-900">Reset Password</h2>
-              <p className="text-sm text-slate-500 mt-1">Please enter your new password below</p>
+              <p className="text-sm text-slate-500 mt-1">Please enter your reset token and new password below</p>
             </div>
 
             {error && <Toast type="error" message={error} onClose={() => setError('')} />}
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              {!tokenFromUrl && (
+                <Input
+                  label="Reset Token"
+                  type="text"
+                  value={formData.token}
+                  onChange={(e) => setFormData({ ...formData, token: e.target.value })}
+                  placeholder="Paste reset token from email"
+                  icon={KeyRound}
+                  required
+                />
+              )}
+
               <Input
                 label="New Password"
                 type="password"

@@ -45,6 +45,7 @@ const Sidebar = ({ isOpen, onClose }) => {
       { name: 'Assessment Center', path: '/student/assessments', icon: FileCheck },
       { name: 'Exams & Assignments', path: '/student/exams', icon: FileText },
       { name: 'Student Performance', path: '/student/performance', icon: BarChart3 },
+      { name: 'Leaderboard', path: '/student/leaderboard', icon: Trophy },
       { name: 'Live Classes', path: '/student/live-classes', icon: Video },
       { name: 'Mentor Connect', path: '/student/mentors', icon: Users },
       { name: 'My Messages', path: '/student/mentor-messages', icon: MessageSquare },

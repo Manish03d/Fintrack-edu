@@ -10,6 +10,8 @@ import { CandidateProfile } from '../models/CandidateProfile.js';
 import { SkillPassport } from '../models/SkillPassport.js';
 import { Certificate } from '../models/Certificate.js';
 import { User } from '../models/User.js';
+import { RecruiterProfile } from '../models/RecruiterProfile.js';
+import { RecruiterMessage } from '../models/RecruiterMessage.js';
 import { getCareerProfileForRecruiter } from './studentCareerController.js';
 import { createUserNotification } from '../services/notificationService.js';
 
@@ -218,6 +220,32 @@ export const getCandidateDetails = async (req, res) => {
 // Recruiter Profile
 export const getRecruiterProfile = async (req, res) => {
   try {
+    if (req.isDbConnected && req.user?.id) {
+      let profile = await RecruiterProfile.findOne({ userId: req.user.id });
+      if (!profile) {
+        profile = await RecruiterProfile.create({
+          userId: req.user.id,
+          companyName: SEEDED_RECRUITER_PROFILE.companyName,
+          industry: SEEDED_RECRUITER_PROFILE.industry,
+          companySize: SEEDED_RECRUITER_PROFILE.companySize,
+          designation: SEEDED_RECRUITER_PROFILE.designation,
+          website: SEEDED_RECRUITER_PROFILE.website,
+        });
+      }
+      const user = await User.findById(req.user.id).select('name email phone avatar');
+      return res.json({
+        success: true,
+        data: {
+          ...profile.toObject(),
+          id: profile._id,
+          name: user?.name || req.user.name,
+          email: user?.email || req.user.email,
+          phone: user?.phone || '',
+          avatar: user?.avatar || '',
+        },
+      });
+    }
+
     return res.json({
       success: true,
       data: SEEDED_RECRUITER_PROFILE,
@@ -231,6 +259,41 @@ export const getRecruiterProfile = async (req, res) => {
 export const updateRecruiterProfile = async (req, res) => {
   try {
     const payload = req.body;
+    if (req.isDbConnected && req.user?.id) {
+      let profile = await RecruiterProfile.findOne({ userId: req.user.id });
+      if (!profile) {
+        profile = new RecruiterProfile({ userId: req.user.id });
+      }
+      if (payload.companyName) profile.companyName = payload.companyName;
+      if (payload.industry) profile.industry = payload.industry;
+      if (payload.companySize) profile.companySize = payload.companySize;
+      if (payload.designation) profile.designation = payload.designation;
+      if (payload.website) profile.website = payload.website;
+      await profile.save();
+
+      if (payload.name || payload.phone || payload.avatar) {
+        const userUpdates = {};
+        if (payload.name) userUpdates.name = payload.name;
+        if (payload.phone) userUpdates.phone = payload.phone;
+        if (payload.avatar) userUpdates.avatar = payload.avatar;
+        await User.findByIdAndUpdate(req.user.id, userUpdates);
+      }
+
+      const user = await User.findById(req.user.id).select('name email phone avatar');
+      return res.json({
+        success: true,
+        message: 'Recruiter profile updated successfully!',
+        data: {
+          ...profile.toObject(),
+          id: profile._id,
+          name: user?.name,
+          email: user?.email,
+          phone: user?.phone,
+          avatar: user?.avatar,
+        },
+      });
+    }
+
     Object.assign(SEEDED_RECRUITER_PROFILE, payload);
     return res.json({
       success: true,
@@ -426,6 +489,60 @@ export const updateInterview = async (req, res) => {
 // Recruiter messaging workspace
 export const getRecruiterConversations = async (req, res) => {
   try {
+    if (req.isDbConnected && req.user?.id) {
+      const recruiterId = String(req.user.id);
+      const jobs = await Job.find({ recruiterId }).select('jobId').lean();
+      const applications = await JobApplication.find({ jobId: { $in: jobs.map((j) => j.jobId) } }).select('candidateId').lean();
+      
+      const sentOrReceived = await RecruiterMessage.find({
+        $or: [{ senderId: recruiterId }, { receiverId: recruiterId }],
+      }).lean();
+      
+      const candidateIdSet = new Set([
+        ...applications.map((a) => String(a.candidateId)),
+        ...sentOrReceived.map((m) => (m.senderId === recruiterId ? m.receiverId : m.senderId)),
+      ]);
+
+      const candidateIds = [...candidateIdSet].filter((id) => mongoose.isValidObjectId(id));
+      const users = await User.find({ _id: { $in: candidateIds } }).select('name email avatar').lean();
+      const usersById = new Map(users.map((u) => [String(u._id), u]));
+
+      const conversations = await Promise.all(
+        candidateIds.map(async (candidateId) => {
+          const user = usersById.get(candidateId);
+          if (!user) return null;
+
+          const latestMessage = await RecruiterMessage.findOne({
+            $or: [
+              { senderId: recruiterId, receiverId: candidateId },
+              { senderId: candidateId, receiverId: recruiterId },
+            ],
+          }).sort({ timestamp: -1 }).lean();
+
+          const unreadCount = await RecruiterMessage.countDocuments({
+            senderId: candidateId,
+            receiverId: recruiterId,
+            isRead: false,
+          });
+
+          return {
+            conversationId: `${recruiterId}_${candidateId}`,
+            candidateId,
+            candidateName: user.name,
+            candidateAvatar: user.avatar || '',
+            unreadCount,
+            lastMessageTime: latestMessage ? latestMessage.timestamp : null,
+            lastMessage: latestMessage ? latestMessage.content : 'No messages yet',
+          };
+        })
+      );
+
+      return res.json({
+        success: true,
+        data: conversations.filter(Boolean),
+      });
+    }
+
     const conversations = SEEDED_RECRUITER_MESSAGES.map(({ messages, ...conversation }) => ({
       ...conversation,
       lastMessage: messages[messages.length - 1]?.text || '',
@@ -438,6 +555,44 @@ export const getRecruiterConversations = async (req, res) => {
 
 export const getRecruiterMessageHistory = async (req, res) => {
   try {
+    const { candidateId } = req.params;
+    if (req.isDbConnected && req.user?.id) {
+      const recruiterId = String(req.user.id);
+      const user = await User.findById(candidateId).select('name email avatar').lean();
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'Candidate not found' });
+      }
+
+      await RecruiterMessage.updateMany(
+        { senderId: candidateId, receiverId: recruiterId, isRead: false },
+        { $set: { isRead: true } }
+      );
+
+      const dbMessages = await RecruiterMessage.find({
+        $or: [
+          { senderId: recruiterId, receiverId: candidateId },
+          { senderId: candidateId, receiverId: recruiterId },
+        ],
+      }).sort({ timestamp: 1 }).lean();
+
+      return res.json({
+        success: true,
+        data: {
+          conversationId: `${recruiterId}_${candidateId}`,
+          candidateId,
+          candidateName: user.name,
+          candidateAvatar: user.avatar || '',
+          unreadCount: 0,
+          messages: dbMessages.map((m) => ({
+            id: m.messageId,
+            senderId: m.senderId,
+            text: m.content,
+            timestamp: m.timestamp,
+          })),
+        },
+      });
+    }
+
     const conversation = SEEDED_RECRUITER_MESSAGES.find(
       (item) => item.candidateId === req.params.candidateId
     );
@@ -457,6 +612,45 @@ export const sendRecruiterMessage = async (req, res) => {
     if (!candidateId || !text) {
       return res.status(400).json({ success: false, message: 'candidateId and text are required' });
     }
+
+    if (req.isDbConnected && req.user?.id) {
+      const recruiterId = String(req.user.id);
+      const candidate = await User.findById(candidateId).select('name');
+      if (!candidate) {
+        return res.status(404).json({ success: false, message: 'Candidate not found' });
+      }
+
+      const message = await RecruiterMessage.create({
+        messageId: `rm_${Date.now()}`,
+        senderId: recruiterId,
+        receiverId: candidateId,
+        candidateName: candidate.name,
+        content: text.trim(),
+        timestamp: new Date(),
+        isRead: false,
+      });
+
+      await createUserNotification({
+        userId: candidateId,
+        eventKey: `message:recruiter:${message.messageId}`,
+        title: 'New message from Recruiter',
+        message: `${req.user.name || 'A recruiter'} sent you a message: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`,
+        category: 'career',
+        type: 'info',
+        link: '/student/career',
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: {
+          id: message.messageId,
+          senderId: message.senderId,
+          text: message.content,
+          timestamp: message.timestamp.toISOString(),
+        },
+      });
+    }
+
     const conversation = SEEDED_RECRUITER_MESSAGES.find((item) => item.candidateId === candidateId);
     if (!conversation) {
       return res.status(404).json({ success: false, message: 'Conversation not found' });

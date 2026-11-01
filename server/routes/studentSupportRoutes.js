@@ -11,7 +11,7 @@ import { uploadSupportTicketAttachment } from '../middleware/supportTicketUpload
 
 const router = express.Router();
 
-router.use(protect, authorizeRoles('student'));
+router.use(protect, authorizeRoles('student', 'mentor', 'recruiter'));
 router.get('/tickets', getStudentSupportTickets);
 router.post('/tickets', uploadSupportTicketAttachment, createStudentSupportTicket);
 router.get('/tickets/:ticketId', getStudentSupportTicket);

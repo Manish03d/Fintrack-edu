@@ -42,6 +42,7 @@ import LiveClassRoomPage from '../pages/student/LiveClassRoomPage';
 import StudentPlaceholder from '../pages/student/StudentPlaceholder';
 import StudentCertificatesPage from '../pages/student/StudentCertificatesPage';
 import StudentSkillsPage from '../pages/student/StudentSkillsPage';
+import StudentLeaderboardPage from '../pages/student/StudentLeaderboardPage';
 import CareerDashboardPage from '../pages/student/CareerDashboardPage';
 import CareerJobsPage from '../pages/student/CareerJobsPage';
 import CareerJobDetailsPage from '../pages/student/CareerJobDetailsPage';
@@ -133,7 +134,7 @@ const AppRoutes = () => {
             <Route path="mentor-messages/:mentorId" element={<StudentMentorMessagesPage />} />
             <Route path="certificates" element={<StudentCertificatesPage />} />
             <Route path="skills" element={<StudentSkillsPage />} />
-            <Route path="leaderboard" element={<StudentPlaceholder />} />
+            <Route path="leaderboard" element={<StudentLeaderboardPage />} />
             <Route path="career" element={<CareerDashboardPage />} />
             <Route path="career/jobs" element={<CareerJobsPage />} />
             <Route path="career/jobs/:jobId" element={<CareerJobDetailsPage />} />

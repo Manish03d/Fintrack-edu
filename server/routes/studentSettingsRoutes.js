@@ -10,7 +10,7 @@ import { protect, authorizeRoles } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-router.use(protect, authorizeRoles('student'));
+router.use(protect, authorizeRoles('student', 'mentor', 'recruiter'));
 router.get('/profile', getStudentSettingsProfile);
 router.put('/profile', updateStudentSettingsProfile);
 router.post('/password', updateStudentPassword);

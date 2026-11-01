@@ -6,6 +6,14 @@ import {
   SEEDED_MENTOR_PROFILE,
 } from '../seed/mentorSeedData.js';
 import { MentorAvailability } from '../models/MentorAvailability.js';
+import { LiveClass } from '../models/LiveClass.js';
+import { LiveClassAttendance } from '../models/LiveClassAttendance.js';
+import { AssignmentSubmission } from '../models/AssignmentSubmission.js';
+import { Assignment } from '../models/Assignment.js';
+import { Course } from '../models/Course.js';
+import { User } from '../models/User.js';
+import { createUserNotification } from '../services/notificationService.js';
+import { SEEDED_ASSIGNMENTS } from '../seed/practiceSeedData.js';
 
 const supportedSessionDurations = [30, 45, 60];
 const validDays = new Set(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
@@ -259,5 +267,281 @@ export const updateMentorAvailability = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Unable to save mentor availability.' });
+  }
+};
+
+// ==========================================
+// MENTOR LIVE CLASSES
+// ==========================================
+
+export const getMentorLiveClasses = async (req, res) => {
+  try {
+    if (!req.isDbConnected) {
+      return res.json({
+        success: true,
+        data: [
+          {
+            id: 'lc_demo_1',
+            title: 'HFT Trading Systems & Market Data Feeds',
+            description: 'Advanced live walkthrough on low-latency market feeds and order book construction.',
+            scheduledAt: new Date(Date.now() + 86400000),
+            durationMinutes: 60,
+            status: 'scheduled',
+            meetingLink: 'https://meet.google.com/fintrack-live-hft',
+            course: { title: 'Algorithmic Trading & HFT Strategies' },
+            attendeesCount: 38,
+          },
+          {
+            id: 'lc_demo_2',
+            title: 'Financial Machine Learning Case Studies',
+            description: 'Live code review and risk classification pipeline evaluation.',
+            scheduledAt: new Date(Date.now() - 3600000 * 2),
+            durationMinutes: 75,
+            status: 'completed',
+            meetingLink: 'https://meet.google.com/fintrack-finml-live',
+            course: { title: 'Financial Machine Learning & Risk Modeling' },
+            attendeesCount: 52,
+          },
+        ],
+      });
+    }
+
+    const mentorId = req.user.id;
+    const liveClasses = await LiveClass.find({ mentorId })
+      .populate('courseId', 'title slug thumbnail')
+      .sort({ scheduledAt: -1 })
+      .lean();
+
+    const classIds = liveClasses.map((lc) => lc._id);
+    const attendances = await LiveClassAttendance.find({ liveClassId: { $in: classIds } }).lean();
+
+    const data = liveClasses.map((lc) => {
+      const attendees = attendances.filter((a) => String(a.liveClassId) === String(lc._id)).length;
+      return {
+        id: lc._id,
+        _id: lc._id,
+        title: lc.title,
+        description: lc.description,
+        scheduledAt: lc.scheduledAt,
+        durationMinutes: lc.durationMinutes,
+        status: lc.status,
+        meetingLink: lc.meetingLink,
+        course: lc.courseId ? { title: lc.courseId.title, slug: lc.courseId.slug } : { title: 'General FinTech' },
+        agenda: lc.agenda || [],
+        materials: lc.materials || [],
+        maxParticipants: lc.maxParticipants,
+        attendeesCount: attendees,
+      };
+    });
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const createMentorLiveClass = async (req, res) => {
+  try {
+    const { title, description, courseId, scheduledAt, durationMinutes, meetingLink, agenda, materials } = req.body;
+
+    if (!title || !scheduledAt) {
+      return res.status(400).json({ success: false, message: 'Class title and scheduled time are required.' });
+    }
+
+    if (!req.isDbConnected) {
+      return res.status(201).json({
+        success: true,
+        message: 'Live class scheduled successfully!',
+        data: {
+          id: `lc_${Date.now()}`,
+          title,
+          description,
+          scheduledAt,
+          durationMinutes: Number(durationMinutes) || 60,
+          meetingLink: meetingLink || 'https://meet.google.com/fintrack-live',
+          status: 'scheduled',
+          attendeesCount: 0,
+        },
+      });
+    }
+
+    // Resolve course
+    let resolvedCourseId = courseId;
+    if (!resolvedCourseId) {
+      const defaultCourse = await Course.findOne();
+      resolvedCourseId = defaultCourse?._id;
+    }
+
+    const liveClass = await LiveClass.create({
+      title,
+      description: description || '',
+      mentorId: req.user.id,
+      courseId: resolvedCourseId,
+      scheduledAt: new Date(scheduledAt),
+      durationMinutes: Number(durationMinutes) || 60,
+      meetingLink: meetingLink || 'https://meet.google.com/fintrack-live',
+      agenda: Array.isArray(agenda) ? agenda : (agenda ? agenda.split('\n').filter(Boolean) : []),
+      materials: Array.isArray(materials) ? materials : [],
+      status: 'scheduled',
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Live class scheduled successfully!',
+      data: liveClass,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateMentorLiveClassStatus = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { status } = req.body;
+
+    if (!['scheduled', 'live', 'completed', 'cancelled'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid live class status.' });
+    }
+
+    if (!req.isDbConnected) {
+      return res.json({ success: true, message: `Class status updated to ${status}.` });
+    }
+
+    const liveClass = await LiveClass.findOneAndUpdate(
+      { _id: classId, mentorId: req.user.id },
+      { $set: { status } },
+      { new: true }
+    );
+
+    if (!liveClass) {
+      return res.status(404).json({ success: false, message: 'Live class not found or unauthorized.' });
+    }
+
+    return res.json({
+      success: true,
+      message: `Live class status updated to ${status}.`,
+      data: liveClass,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==========================================
+// MENTOR ASSIGNMENT & ASSESSMENT EVALUATION
+// ==========================================
+
+export const getMentorSubmissions = async (req, res) => {
+  try {
+    if (!req.isDbConnected) {
+      return res.json({
+        success: true,
+        data: [
+          {
+            submissionId: 'sub_demo_1',
+            assignmentId: 'asg_101',
+            assignmentTitle: 'Building an Algorithmic Backtester in Python',
+            studentName: 'Vishaltharshan S',
+            studentEmail: 'student@fintrack.edu',
+            submittedAt: new Date(Date.now() - 3600000 * 5),
+            status: 'submitted',
+            marksObtained: null,
+            content: 'Implemented vector backtester with transaction costs, slippage, and Sharpe ratio calculations.',
+            attachmentName: 'backtester_submission.py',
+            feedback: '',
+          },
+          {
+            submissionId: 'sub_demo_2',
+            assignmentId: 'asg_102',
+            assignmentTitle: 'DeFi Smart Contract Security Audit',
+            studentName: 'Priya Ramanathan',
+            studentEmail: 'priya@fintrack.edu',
+            submittedAt: new Date(Date.now() - 86400000),
+            status: 'evaluated',
+            marksObtained: 94,
+            content: 'Identified reentrancy vulnerabilities and proposed CEI pattern with automated Slither checks.',
+            attachmentName: 'defi_security_audit.pdf',
+            feedback: 'Exceptional depth in vulnerability analysis and clean remediation code.',
+          },
+        ],
+      });
+    }
+
+    const submissions = await AssignmentSubmission.find()
+      .populate('studentId', 'name email avatar')
+      .sort({ submittedAt: -1 })
+      .lean();
+
+    const data = submissions.map((sub) => {
+      const seeded = SEEDED_ASSIGNMENTS.find((a) => a.assignmentId === sub.assignmentId);
+      return {
+        submissionId: sub.submissionId,
+        assignmentId: sub.assignmentId,
+        assignmentTitle: seeded ? seeded.title : 'FinTech Practical Assignment',
+        studentId: sub.studentId?._id,
+        studentName: sub.studentId?.name || 'Student',
+        studentEmail: sub.studentId?.email || '',
+        studentAvatar: sub.studentId?.avatar || '',
+        submittedAt: sub.submittedAt,
+        status: sub.status,
+        marksObtained: sub.marksObtained,
+        content: sub.content,
+        attachmentName: sub.attachmentName,
+        feedback: sub.feedback || '',
+      };
+    });
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const gradeMentorSubmission = async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    const { marksObtained, feedback } = req.body;
+
+    const marks = Number(marksObtained);
+    if (Number.isNaN(marks) || marks < 0 || marks > 100) {
+      return res.status(400).json({ success: false, message: 'Marks must be a number between 0 and 100.' });
+    }
+
+    if (!req.isDbConnected) {
+      return res.json({
+        success: true,
+        message: 'Assignment graded successfully!',
+        data: { submissionId, marksObtained: marks, feedback, status: 'evaluated' },
+      });
+    }
+
+    const submission = await AssignmentSubmission.findOne({ submissionId });
+    if (!submission) {
+      return res.status(404).json({ success: false, message: 'Submission not found.' });
+    }
+
+    submission.marksObtained = marks;
+    submission.feedback = feedback || 'Evaluated by mentor.';
+    submission.status = 'evaluated';
+    await submission.save();
+
+    await createUserNotification({
+      userId: submission.studentId,
+      eventKey: `assignment:graded:${submissionId}:${Date.now()}`,
+      title: 'Assignment Evaluated',
+      message: `Your assignment submission has been graded: ${marks}/100. Feedback: "${(feedback || '').slice(0, 80)}"`,
+      category: 'learning',
+      type: 'success',
+      link: '/student/exams',
+    });
+
+    return res.json({
+      success: true,
+      message: 'Assignment graded and student notified successfully!',
+      data: submission,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -9,6 +9,11 @@ import {
   updateMentorProfile,
   getMentorAvailability,
   updateMentorAvailability,
+  getMentorLiveClasses,
+  createMentorLiveClass,
+  updateMentorLiveClassStatus,
+  getMentorSubmissions,
+  gradeMentorSubmission,
 } from '../controllers/mentorController.js';
 import {
   getMentorSessions,
@@ -59,5 +64,14 @@ router.get('/profile', getMentorProfile);
 router.put('/profile', updateMentorProfile);
 router.get('/availability', getMentorAvailability);
 router.put('/availability', updateMentorAvailability);
+
+// Live Classes
+router.get('/live-classes', getMentorLiveClasses);
+router.post('/live-classes', createMentorLiveClass);
+router.put('/live-classes/:classId/status', updateMentorLiveClassStatus);
+
+// Assignments & Assessments
+router.get('/assignments/submissions', getMentorSubmissions);
+router.put('/assignments/submissions/:submissionId/grade', gradeMentorSubmission);
 
 export default router;
